@@ -4,6 +4,7 @@ import { W, H, BASE_Y, clamp, lerp, rand, pick, dist, smooth, angleWrap, rotate,
 import { Scene } from './scene.js';
 import { Bottle, Mug, Particles } from './objects.js';
 import { Friend, Waiter } from './characters.js';
+import { track } from './analytics.js';
 
 const SLOTS = [655, 765, 1180, 1295];
 const MUG_HOME = 960;
@@ -753,6 +754,7 @@ export class Game {
     });
     this.later(1.5, () => this.friendSay('jarDone', true));
     this.tutDone(2);
+    track('jar_finished', { jars: this.stats.jars, litres: +this.stats.drunkL.toFixed(2) });
   }
 
   breakBottle(o) {
@@ -807,6 +809,7 @@ export class Game {
       this.popup(label, W / 2, 330, { size: 84, color: '#ffd23f', dur: 1.5 });
       this.shake = 0.4;
       this.tutDone(3);
+      track('waiter_called', { source: src }); // voice | hand | key
       this.later(0.2, () => this.friendSay('callWaiter', true));
     }
     const empties = this.bottles.filter((b) => b.state === 'table' && !b.capped && b.level < 0.06);
@@ -1006,6 +1009,7 @@ export class Game {
     if (this.tut !== step) return;
     this.tut++;
     this.tutFlash = 1;
+    track('tutorial_step', { step: this.tut, of: TUTORIAL.length }); // shows where people drop off
     if (this.tut >= TUTORIAL.length) {
       this.later(1.5, () => this.popup('PRO BEWDA UNLOCKED 🏆', W / 2, 180, { size: 58, color: '#9cff6b', dur: 2 }));
     }

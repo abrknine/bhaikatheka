@@ -6,6 +6,7 @@ import { VoiceCommand } from './speech.js';
 import { PostFX } from './fx.js';
 import { Game } from './game.js';
 import { drawPlaceholder } from './characters.js';
+import { track } from './analytics.js';
 
 const $ = (s) => document.querySelector(s);
 // Render resolution multiplier (1.0 = 1600x900).
@@ -237,6 +238,12 @@ async function enter(withCam) {
     if (camOn) vision.setVideo(video);
   }
   game.ui.camera = camOn && visionOn;
+  track('game_start', {
+    mode: camOn && visionOn ? 'camera' : 'mouse',
+    camera_ok: camOn,
+    tracking_ok: visionOn,
+    background_removal: !!vision.seg,
+  });
   $('#toolbar').classList.remove('hidden');
   voice.start();
   game.start();
