@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bhai Ka Theka — AR Beer Simulator</title>
+    <meta name="description" content="Webcam AR game: grab virtual beer bottles with your real hands, pour, chug, and shout WAITER in a desi theka." />
+    <meta property="og:title" content="Bhai Ka Theka 🍺" />
+    <meta property="og:description" content="Grab bottles with your real hands. Pour. Chug. Shout WAITER. Zero hangover." />
+    <meta name="theme-color" content="#1b0f05" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍺</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Bangers&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <video id="cam" playsinline muted></video>
+
+    <div id="start" class="overlay">
+      <div class="card">
+        <div class="neon">BHAI KA <span>THEKA</span></div>
+        <div class="hindi">भाई का ठेका</div>
+        <p class="tag">AR beer simulator. Your real hands. Virtual daaru. Zero hangover.</p>
+        <div class="steps">
+          <div><b>✊</b><span>Make a <em>fist</em> on a bottle to grab it</span></div>
+          <div><b>🍺</b><span>Hold it over the jar & <em>tilt</em> to pour</span></div>
+          <div><b>😮</b><span>Bring the jar to your <em>mouth</em> & chug</span></div>
+          <div><b>🗣️</b><span>Out of beer? Shout <em>“WAITER!”</em></span></div>
+        </div>
+        <button id="go">ENTER THEKA 🍻</button>
+        <button id="nocam" class="ghost">No camera? Play with mouse</button>
+        <p class="fine">
+          Allow camera + mic. Video is processed on your device — nothing is uploaded. The “WAITER” voice command uses your
+          browser’s speech service. Best in Chrome / Edge. Virtual beer only — drink responsibly.
+        </p>
+      </div>
+    </div>
+
+    <div id="loading" class="overlay hidden">
+      <div class="card small">
+        <div class="loader-title">Loading…</div>
+        <div class="bar"><i></i></div>
+        <div class="loader-msg"></div>
+      </div>
+    </div>
+
+    <div id="help" class="overlay hidden">
+      <div class="card help">
+        <div class="loader-title">How to drink 🍺</div>
+        <table>
+          <tr><td>✊ Fist / 🤏 pinch</td><td>Grab a bottle or the jar</td></tr>
+          <tr><td>🔄 Rotate your wrist</td><td>Tilt it (hover over the jar and it pours itself)</td></tr>
+          <tr><td>😮 Jar near mouth</td><td>Drink — open your mouth to chug faster</td></tr>
+          <tr><td>🥂 Jar to Bunty’s glass</td><td>Cheers!</td></tr>
+          <tr><td>🗣️ “WAITER!” / ✋ hand up</td><td>Chhotu brings & opens new bottles</td></tr>
+          <tr><td><kbd>W</kbd></td><td>Call waiter</td></tr>
+          <tr><td><kbd>B</kbd> <kbd>H</kbd> <kbd>A</kbd></td><td>Background removal · hand skeleton · pour assist</td></tr>
+          <tr><td><kbd>M</kbd> <kbd>V</kbd> <kbd>F</kbd> <kbd>R</kbd></td><td>Music · voices · fullscreen · new round</td></tr>
+          <tr><td><kbd>[</kbd> <kbd>]</kbd> <kbd>←↑→↓</kbd> <kbd>C</kbd></td><td>Move / zoom yourself in the scene · reset</td></tr>
+          <tr><td>🖱️ Mouse</td><td>Click-hold to grab · scroll or <kbd>Q</kbd>/<kbd>E</kbd> to tilt</td></tr>
+        </table>
+        <button id="help-close" class="ghost">Close</button>
+      </div>
+    </div>
+
+    <div id="toolbar" class="hidden">
+      <button data-act="waiter" title="Call waiter (W)">🛎️ WAITER</button>
+      <button data-act="music" title="Music (M)">🎵</button>
+      <button data-act="voice" title="Character voices (V)">🗣️</button>
+      <button data-act="bg" title="Background removal (B)">🎭</button>
+      <button data-act="skeleton" title="Hand skeleton (H)">✋</button>
+      <button data-act="assist" title="Pour assist (A)">🎯</button>
+      <button data-act="fullscreen" title="Fullscreen (F)">⛶</button>
+      <button data-act="help" title="Help (?)">❓</button>
+    </div>
+
+    <div id="toast"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
