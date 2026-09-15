@@ -295,6 +295,25 @@ export class Audio {
     });
   }
 
+  // soft playful pat
+  pat() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const n = this.src();
+    const g = this.gain(0, this.sfx);
+    this.env(g, t, 0.001, 0.55, 0.07);
+    n.connect(this.filter('lowpass', 1600)).connect(g);
+    n.start(t, rand(0, 1.5), 0.1);
+    const o = this.osc('sine', 190);
+    o.frequency.exponentialRampToValueAtTime(90, t + 0.08);
+    const og = this.gain(0, this.sfx);
+    this.env(og, t, 0.002, 0.3, 0.08);
+    o.connect(og);
+    o.start(t);
+    o.stop(t + 0.12);
+    this.sparkle();
+  }
+
   meow() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;

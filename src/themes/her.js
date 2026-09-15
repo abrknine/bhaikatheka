@@ -540,6 +540,7 @@ export class Girlfriend {
     this.sipT = 0;
     this.nextSip = rand(10, 16);
     this.cheersT = 0;
+    this.pokeT = 0;
     this.hand = { x: 392, y: 790 };
     this.serveHand = { x: 160, y: 690 };
     // server interface (same shape the waiter job uses)
@@ -603,6 +604,23 @@ export class Girlfriend {
     if (this.seated && this.cheersT < 0.5) this.cheersT = 0.5;
   }
 
+  // Playful spank: her lower back / hip, just above the table edge.
+  get pokeZone() {
+    return { x0: this.x - 125, x1: this.x + 130, y0: 600, y1: 735 };
+  }
+
+  poke() {
+    this.pokeT = 0.6;
+    this.blush = 1;
+    this.shock = 0.5;
+    this.cheersT = 0;
+    this.addHearts(5);
+  }
+
+  get hop() {
+    return this.pokeT > 0 ? Math.sin(((0.6 - this.pokeT) / 0.6) * Math.PI) * 16 : 0;
+  }
+
   get glassPos() {
     return this.seated ? { x: this.hand.x, y: this.hand.y - 30 } : null;
   }
@@ -642,6 +660,7 @@ export class Girlfriend {
     this.blink = Math.max(0, this.blink - dt * 7);
     this.blush = Math.max(0, this.blush - dt * 0.35);
     this.shock = Math.max(0, this.shock - dt);
+    this.pokeT = Math.max(0, this.pokeT - dt);
     if (look) {
       this.lookX = smooth(this.lookX, clamp((look.x - this.x) / 250, -1, 1) * 5, 6, dt);
       this.lookY = smooth(this.lookY, clamp((look.y - 370) / 250, -1, 1) * 4, 6, dt);
@@ -728,7 +747,7 @@ export class Girlfriend {
       (this.talkT > 0 ? Math.sin(t * 7) * 0.02 : 0);
     const hs = Math.sin(t * 1.1) * 4;
     ctx.save();
-    ctx.translate(cx, this.bob);
+    ctx.translate(cx, this.bob - this.hop);
 
     if (!this.seated) {
       const arm = solveIK(66, 522, 128, 604, 100, 96, 1);
@@ -1092,6 +1111,7 @@ export default {
     waiterBusy: ["I'm getting it, patience! 😄"],
     broke: ['You broke a bottle?! Are you okay? 😱', "Don't touch the glass! I'll clean it 🥺"],
     idle: ["You're so quiet... everything okay? 🥺", "Your beer's getting warm!", 'Talk to me 😄'],
+    spank: ['Oye! 🙈 Naughty!', 'Hey! 😳 Behave, jaan!', 'Haww! 😤💕', 'Hmph! No beer for you... just kidding 💕'],
     tipsy: [
       "You're getting cute and wobbly 😂",
       'Drink some water too, okay?',

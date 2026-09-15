@@ -336,6 +336,7 @@ export class Game {
       h.wasClosed = h.closed;
       h.hover = h.held ? null : this.findGrabbable(h.x, h.y);
       h.hoverSource = h.held || h.hover ? null : this.findSource(h.x, h.y);
+      this.checkPoke(h);
 
       if (h.source === 'cam') {
         h.raiseCd = Math.max(0, h.raiseCd - dt);
@@ -369,6 +370,24 @@ export class Game {
   // Things you can pull a fresh bottle out of (the mini fridge).
   findSource(x, y) {
     return this.fridge && this.fridge.grabDist(x, y) < 20 ? this.fridge : null;
+  }
+
+  // Companions can expose a pokeZone (Her Place: a playful spank). Mouse = click in
+  // the zone; camera = a quick open-hand swipe through it.
+  checkPoke(h) {
+    const z = this.friend.pokeZone;
+    const pressed = h.closed && !h.pokeLatch;
+    h.pokeLatch = h.closed;
+    if (!z || h.held || h.hover || this.t < (this.cool.poke || 0)) return;
+    if (h.x < z.x0 || h.x > z.x1 || h.y < z.y0 || h.y > z.y1) return;
+    const hit = h.source === 'mouse' ? pressed : !h.closed && Math.hypot(h.vx, h.vy) > 900;
+    if (!hit) return;
+    this.cool.poke = this.t + 2.5;
+    this.friend.poke();
+    this.audio.pat();
+    this.popup('SPANK! 🙈', h.x, z.y0 - 30, { size: 58, color: this.theme.hud.accent, rot: rand(-0.2, 0.2) });
+    this.friendSay('spank', true);
+    this.lastAction = this.t;
   }
 
   tryGrab(h) {
