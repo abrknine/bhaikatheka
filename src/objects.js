@@ -28,6 +28,18 @@ function bottlePath(ctx) {
   ctx.closePath();
 }
 
+export function drawHeart(ctx, x, y, s, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, s * 0.35);
+  ctx.bezierCurveTo(-s * 1.1, -s * 0.35, -s * 0.55, -s * 1.15, 0, -s * 0.5);
+  ctx.bezierCurveTo(s * 0.55, -s * 1.15, s * 1.1, -s * 0.35, 0, s * 0.35);
+  ctx.fill();
+  ctx.restore();
+}
+
 export function drawCap(ctx, x, y) {
   ctx.fillStyle = '#d4a017';
   ctx.beginPath();
@@ -553,6 +565,15 @@ export class Particles {
           ctx.closePath();
           ctx.fill();
           ctx.restore();
+          break;
+        case 'heart':
+          drawHeart(ctx, p.x, p.y, p.size, p.color.replace('A', Math.min(1, k * 2).toFixed(2)));
+          break;
+        case 'mist':
+          ctx.fillStyle = `rgba(215,240,255,${0.16 * Math.sin(Math.PI * k)})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * (1.4 - k * 0.4), 0, Math.PI * 2);
+          ctx.fill();
           break;
         case 'cap':
           ctx.save();

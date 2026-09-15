@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bhai Ka Theka — AR Beer Simulator</title>
-    <meta name="description" content="Webcam AR game: grab virtual beer bottles with your real hands, pour, chug, and shout WAITER in a desi theka." />
+    <meta name="description" content="Webcam AR game: grab virtual beer bottles with your real hands, pour, chug — in a desi theka, your own room, or at her place." />
     <meta property="og:title" content="Bhai Ka Theka 🍺" />
-    <meta property="og:description" content="Grab bottles with your real hands. Pour. Chug. Shout WAITER. Zero hangover." />
+    <meta property="og:description" content="Grab bottles with your real hands. Pour. Chug. Pick your vibe. Zero hangover." />
     <meta name="theme-color" content="#1b0f05" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍺</text></svg>" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -24,26 +24,28 @@
       gtag('config', 'G-ENNE67EQTP');
     </script>
   </head>
-  <body>
+  <body data-theme="theka">
     <canvas id="view"></canvas>
     <video id="cam" playsinline muted></video>
 
     <div id="start" class="overlay">
       <div class="card">
-        <div class="neon">BHAI KA <span>THEKA</span></div>
-        <div class="hindi">भाई का ठेका</div>
-        <p class="tag">AR beer simulator. Your real hands. Virtual daaru. Zero hangover.</p>
+        <div class="neon"><span id="title-a">BHAI KA</span> <span id="title-b" class="hl">THEKA</span></div>
+        <div class="hindi" id="subtitle">भाई का ठेका</div>
+        <p class="tag" id="tagline">AR beer simulator. Your real hands. Virtual daaru. Zero hangover.</p>
+        <div class="pick-label">Pick your vibe</div>
+        <div id="themes" class="themes"></div>
         <div class="steps">
           <div><b>✊</b><span>Make a <em>fist</em> on a bottle to grab it</span></div>
           <div><b>🍺</b><span>Hold it over the jar & <em>tilt</em> to pour</span></div>
           <div><b>😮</b><span>Bring the jar to your <em>mouth</em> & chug</span></div>
-          <div><b>🗣️</b><span>Out of beer? Shout <em>“WAITER!”</em></span></div>
+          <div><b id="step-refill-icon">🗣️</b><span id="step-refill">Out of beer? Shout <em>“WAITER!”</em></span></div>
         </div>
         <button id="go">ENTER THEKA 🍻</button>
         <button id="nocam" class="ghost">No camera? Play with mouse</button>
         <p class="fine">
-          Allow camera + mic. Video is processed on your device — nothing is uploaded. The “WAITER” voice command uses your
-          browser’s speech service. Best in Chrome / Edge. Virtual beer only — drink responsibly.
+          Allow camera + mic. Video is processed on your device — nothing is uploaded. Voice commands use your browser’s
+          speech service. Best in Chrome / Edge. Virtual beer only — drink responsibly.
         </p>
       </div>
     </div>
@@ -63,9 +65,9 @@
           <tr><td>✊ Fist / 🤏 pinch</td><td>Grab a bottle or the jar</td></tr>
           <tr><td>🔄 Rotate your wrist</td><td>Tilt it (hover over the jar and it pours itself)</td></tr>
           <tr><td>😮 Jar near mouth</td><td>Drink — open your mouth to chug faster</td></tr>
-          <tr><td>🥂 Jar to Bunty’s glass</td><td>Cheers!</td></tr>
-          <tr><td>🗣️ “WAITER!” / ✋ hand up</td><td>Chhotu brings & opens new bottles</td></tr>
-          <tr><td><kbd>W</kbd></td><td>Call waiter</td></tr>
+          <tr><td>🥂 Jar to their glass</td><td>Cheers! (or boop the cat)</td></tr>
+          <tr><td id="help-refill-a">🗣️ “WAITER!” / ✋ hand up</td><td id="help-refill-b">Chhotu brings & opens new bottles</td></tr>
+          <tr><td><kbd>W</kbd> <kbd>T</kbd></td><td>Refill · switch world</td></tr>
           <tr><td><kbd>B</kbd> <kbd>H</kbd> <kbd>A</kbd></td><td>Background removal · hand skeleton · pour assist</td></tr>
           <tr><td><kbd>M</kbd> <kbd>V</kbd> <kbd>F</kbd> <kbd>R</kbd></td><td>Music · voices · fullscreen · new round</td></tr>
           <tr><td><kbd>[</kbd> <kbd>]</kbd> <kbd>←↑→↓</kbd> <kbd>C</kbd></td><td>Move / zoom yourself in the scene · reset</td></tr>
@@ -76,7 +78,8 @@
     </div>
 
     <div id="toolbar" class="hidden">
-      <button data-act="waiter" title="Call waiter (W)">🛎️ WAITER</button>
+      <button data-act="waiter" title="Refill (W)">🛎️ WAITER</button>
+      <button data-act="theme" title="Switch world (T)">🎨</button>
       <button data-act="music" title="Music (M)">🎵</button>
       <button data-act="voice" title="Character voices (V)">🗣️</button>
       <button data-act="bg" title="Background removal (B)">🎭</button>

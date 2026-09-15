@@ -7,6 +7,7 @@ import { PostFX } from './fx.js';
 import { Game } from './game.js';
 import { drawPlaceholder } from './characters.js';
 import { track } from './analytics.js';
+import { THEMES, DEFAULT_THEME } from './themes/index.js';
 
 const $ = (s) => document.querySelector(s);
 // Render resolution multiplier (1.0 = 1600x900).
@@ -39,22 +40,34 @@ let visionOn = false;
 const mouse = { x: W / 2, y: H / 2, down: false, roll: 0, last: -1e9 };
 const keys = new Set();
 
+const store = {
+  get(key, fallback) {
+    try {
+      return localStorage.getItem(key) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  },
+  set(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* private mode */
+    }
+  },
+};
+
+const THEME_KEY = 'theka.theme.v1';
 const CAL_KEY = 'theka.cal.v1';
 const CAL_DEFAULT = { scale: 0.92, ox: 150, oy: 0 };
 const cal = (() => {
   try {
-    return { ...CAL_DEFAULT, ...JSON.parse(localStorage.getItem(CAL_KEY) || '{}') };
+    return { ...CAL_DEFAULT, ...JSON.parse(store.get(CAL_KEY, '{}')) };
   } catch {
     return { ...CAL_DEFAULT };
   }
 })();
-const saveCal = () => {
-  try {
-    localStorage.setItem(CAL_KEY, JSON.stringify(cal));
-  } catch {
-    /* private mode */
-  }
-};
+const saveCal = () => store.set(CAL_KEY, JSON.stringify(cal));
 
 function toast(msg, ms = 3200) {
   const el = $('#toast');
@@ -150,6 +163,7 @@ const voice = new VoiceCommand({
   },
   // ignore the mic while our own characters are talking ("...bula WAITER ko!")
   canTrigger: () => !!game?.started && !audio.isSpeaking,
+  getWake: () => game?.theme.voice.wake,
 });
 
 let last = performance.now();
@@ -198,13 +212,57 @@ async function startCamera() {
   if (video.readyState < 2) await new Promise((r) => video.addEventListener('loadeddata', r, { once: true }));
 }
 
-const LOADING_LINES = [
-  'Fridge se thandi nikal rahe hain…',
-  'Chakna garam ho raha hai…',
-  'Bunty bhai ko bula rahe hain…',
-  'Chhotu ko jagaa rahe hain…',
-  'Table saaf ho rahi hai (thodi si)…',
-];
+// ------------------------------------------------------------------ themes
+
+function buildThemePicker() {
+  const box = $('#themes');
+  box.innerHTML = '';
+  for (const th of THEMES) {
+    const card = document.createElement('button');
+    card.className = 'theme-card';
+    card.dataset.theme = th.id;
+    card.type = 'button';
+    card.innerHTML = '<span class="te"></span><span class="tn"></span><span class="tb"></span>';
+    card.querySelector('.te').textContent = th.emoji;
+    card.querySelector('.tn').textContent = th.name;
+    card.querySelector('.tb').textContent = th.blurb;
+    card.addEventListener('click', () => setTheme(th.id));
+    box.appendChild(card);
+  }
+}
+
+function applyThemeUI() {
+  const th = game.theme;
+  document.body.dataset.theme = th.id;
+  $('#title-a').textContent = th.title[0];
+  $('#title-b').textContent = th.title[1];
+  $('#subtitle').textContent = th.subtitle;
+  $('#tagline').textContent = th.tagline;
+  $('#step-refill-icon').textContent = th.refillIcon;
+  $('#step-refill').innerHTML = th.refillStep; // static theme copy, not user input
+  $('#go').textContent = th.enter;
+  $('#toolbar [data-act="waiter"]').textContent = th.refillButton;
+  $('#help-refill-a').textContent = th.help[0];
+  $('#help-refill-b').textContent = th.help[1];
+  for (const c of document.querySelectorAll('.theme-card')) c.classList.toggle('active', c.dataset.theme === th.id);
+  audio.setStyle(th.music, th.ambience);
+}
+
+function setTheme(id, announce = false) {
+  if (game.theme.id === id) return;
+  game.setTheme(id);
+  store.set(THEME_KEY, id);
+  applyThemeUI();
+  track('theme_change', { theme: id });
+  if (announce) toast(`${game.theme.emoji} ${game.theme.name}`, 1600);
+}
+
+function nextTheme() {
+  const i = THEMES.findIndex((t) => t.id === game.theme.id);
+  setTheme(THEMES[(i + 1) % THEMES.length].id, true);
+}
+
+// ------------------------------------------------------------------ start
 
 async function enter(withCam) {
   audio.init();
@@ -213,9 +271,10 @@ async function enter(withCam) {
     $('#loading').classList.remove('hidden');
     const msg = $('.loader-msg');
     const bar = $('.bar i');
+    const lines = game.theme.loading;
     let li = 0;
-    msg.textContent = LOADING_LINES[0];
-    const spin = setInterval(() => (msg.textContent = LOADING_LINES[++li % LOADING_LINES.length]), 1600);
+    msg.textContent = lines[0];
+    const spin = setInterval(() => (msg.textContent = lines[++li % lines.length]), 1600);
     const camP = startCamera()
       .then(() => (camOn = true))
       .catch((err) => {
@@ -243,6 +302,7 @@ async function enter(withCam) {
     camera_ok: camOn,
     tracking_ok: visionOn,
     background_removal: !!vision.seg,
+    theme: game.theme.id,
   });
   $('#toolbar').classList.remove('hidden');
   voice.start();
@@ -253,6 +313,7 @@ async function enter(withCam) {
 
 const actions = {
   waiter: () => game.callWaiter('key'),
+  theme: () => nextTheme(),
   music: () => toast(audio.toggleMusic() ? '🎵 Music on' : '🎵 Music off', 1200),
   voice: () => {
     audio.voiceOn = !audio.voiceOn;
@@ -261,7 +322,7 @@ const actions = {
   },
   bg: () => {
     vision.useSeg = !vision.useSeg;
-    toast(vision.useSeg ? '🎭 Theka background on' : '🎭 Showing your real room', 1400);
+    toast(vision.useSeg ? '🎭 Virtual background on' : '🎭 Showing your real room', 1400);
   },
   skeleton: () => (game.opts.skeleton = !game.opts.skeleton),
   assist: () => {
@@ -309,6 +370,7 @@ addEventListener('keydown', (e) => {
   if (e.repeat && !k.startsWith('arrow') && k !== '[' && k !== ']') return;
   switch (k) {
     case 'w': actions.waiter(); break;
+    case 't': actions.theme(); break;
     case 'm': actions.music(); break;
     case 'v': actions.voice(); break;
     case 'b': actions.bg(); break;
@@ -379,8 +441,10 @@ async function boot() {
   } catch {
     /* fonts are optional */
   }
-  game = new Game(audio, RS);
+  game = new Game(audio, RS, store.get(THEME_KEY, DEFAULT_THEME));
   window.theka = { game, vision, audio, cal };
+  buildThemePicker();
+  applyThemeUI();
   requestAnimationFrame((t) => {
     last = t;
     loop(t);

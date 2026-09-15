@@ -4,10 +4,12 @@ const WAKE =
   /(waiter|waitor|weiter|vetar|veter|wetter|water|bhaiya|bhaiyya|bhaiyaa|chhotu|chotu|chootu|oye|one more|वेटर|भैया|छोटू|ओए)/i;
 
 export class VoiceCommand {
-  constructor({ onWaiter, onHeard, canTrigger }) {
+  constructor({ onWaiter, onHeard, canTrigger, getWake }) {
     this.onWaiter = onWaiter;
     this.onHeard = onHeard;
     this.canTrigger = canTrigger;
+    this.getWake = getWake; // each theme listens for its own words
+
     this.state = 'off'; // off | listening | denied | unsupported
     this.last = 0;
   }
@@ -33,8 +35,9 @@ export class VoiceCommand {
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
         this.onHeard?.(res[0].transcript, res.isFinal);
+        const wake = this.getWake?.() || WAKE;
         for (let k = 0; k < res.length; k++) {
-          if (WAKE.test(res[k].transcript)) {
+          if (wake.test(res[k].transcript)) {
             this.fire();
             break;
           }

@@ -174,6 +174,11 @@ export class Friend {
     return Math.sin(this.t * 0.9) * 4 * (1 + this.drunk * 3);
   }
 
+  // Render layer: behind the player.
+  drawBack(ctx) {
+    this.drawBody(ctx);
+  }
+
   drawBody(ctx) {
     const t = this.t;
     const d = this.drunk;
@@ -503,7 +508,8 @@ export class Waiter {
     return this.x < W + 150;
   }
 
-  drawBody(ctx) {
+  // Render layer: in front of the player, behind the table.
+  drawMid(ctx) {
     if (!this.visible) return;
     const t = this.t;
     const bob = this.bob;
@@ -652,7 +658,8 @@ export class Waiter {
     ctx.restore();
   }
 
-  drawFront(ctx) {
+  // Render layer: on top of the bottles (his serving arm).
+  drawTop(ctx) {
     if (!this.visible) return;
     const sx = this.x - 60;
     const sy = 524 + this.bob;

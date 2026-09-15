@@ -1,12 +1,11 @@
 // Game brain: turns hand/face tracking into grabbing, pouring, chugging, cheers,
-// spills, broken bottles, a drunk-o-meter, and a waiter who actually shows up.
+// spills and broken bottles. Everything world-specific — the room, who's with you,
+// how beer gets refilled, what they say — comes from the active theme.
 import { W, H, BASE_Y, clamp, lerp, rand, pick, dist, smooth, angleWrap, rotate, OneEuro, easeOutBack, easeInOut } from './util.js';
-import { Scene } from './scene.js';
 import { Bottle, Mug, Particles } from './objects.js';
-import { Friend, Waiter } from './characters.js';
+import { getTheme, DEFAULT_THEME } from './themes/index.js';
 import { track } from './analytics.js';
 
-const SLOTS = [655, 765, 1180, 1295];
 const MUG_HOME = 960;
 const BOTTLE_L = 0.65; // litres in a bottle; the jar holds 1.0 L
 
@@ -17,40 +16,7 @@ const HAND_LINKS = [
 
 const STAGES = ['Sober 😇', 'Suroor 🙂', 'Tipsy 😊', 'Talli 🤪', 'Full Talli 🥴', 'Tunn 💫', 'Out of Syllabus 🌀'];
 
-const TUTORIAL = [
-  '✊ Make a FIST on a bottle to pick it up',
-  '🍺 Hold it over the JAR and tilt to pour',
-  '😮 Grab the JAR and bring it to your MOUTH',
-  '🗣️ Out of beer? Shout "WAITER!" (or raise a hand ✋)',
-];
-
-const LINES = {
-  intro: ['Aaja bhai! Aaj ka bill mera. Chhotu, bottle laa!', 'Aa gaya mera sher! Chhotu, thandi laa jaldi!'],
-  pour: ['Haan bhar de, bhar de!', 'Tircha pakad, jhaag kam banega!', 'Dheere bhai, dheere...'],
-  perfect: ['Kya pour hai! Bartender ban ja tu!', 'Ekdum perfect jhaag!'],
-  overflow: ['Arre bas bas! Gir rahi hai!', 'Jhaag hi jhaag kar diya!'],
-  spill: ['Oye! Beer mat gira, paap lagega!', 'Table ko pila raha hai kya?', 'Arre nuksaan mat kar bhai!'],
-  drink: ['Ek saans mein! Ek saans mein!', 'Chugg chugg chugg!', 'Pee ja bhai, pee ja!'],
-  bottleDrink: ['Bottle se hi? Patiala style!', 'Jar kis liye rakha hai bhai?'],
-  jarDone: ['Waah! Tu toh legend hai!', 'Ek aur ho jaaye?', 'Ye hui na baat!', 'Purana khiladi hai tu!'],
-  cheers: ['Cheers bhai! Dosti zindabad!', 'Yaari ke naam!', 'Cheers! Tu mera bhai hai!'],
-  empty: ['Khatam! Zor se bol WAITER!', 'Sab khaali... bula WAITER ko!', 'Beer khatam! WAITER ko awaaz de!'],
-  callWaiter: ['Haan bula usko!', 'Chhotu! Do aur thandi!'],
-  waiterBusy: ['Aa raha hai bhai, sabar kar!'],
-  broke: ['Tod di?! Bill mein judega!', 'Arre bottle tod di! Paise tere!'],
-  idle: ['Soch kya raha hai? Utha bottle!', 'Beer garam ho jaayegi bhai!', 'Haath mein bottle pakad na!'],
-  tipsy: ['Bhai tu hil kyun raha hai?', 'Tu mera sabse accha dost hai... sach mein!', 'Ghar kaise jaayega re?', 'Ek aur... phir pakka ghar.'],
-  six: ['SIX! Kya maara!', 'Chhakka! Waah!'],
-  four: ['Chauka! Shabaash!'],
-  out: ['Out?! Kya bakwaas shot tha!'],
-};
 const LINE_CD = { pour: 14, drink: 14, bottleDrink: 20, spill: 8, overflow: 8, idle: 25, six: 25, four: 25, out: 25, tipsy: 20 };
-
-const WAITER_LINES = {
-  hi: ['Aaya saab!', 'Haan saab, abhi laaya!'],
-  full: ['Saab abhi toh bhari padi hai!'],
-  bye: ['Enjoy karo saab!', 'Aur kuch chahiye toh bolna!', 'Chakna free hai saab!'],
-};
 
 function makeHand(source) {
   return {
@@ -76,6 +42,7 @@ function makeHand(source) {
     rollPrev: null,
     held: null,
     hover: null,
+    hoverSource: null,
     pts: null,
     raiseT: 0,
     raiseCd: 0,
@@ -83,19 +50,26 @@ function makeHand(source) {
 }
 
 export class Game {
-  constructor(audio, rs) {
+  constructor(audio, rs, themeId = DEFAULT_THEME) {
     this.audio = audio;
+    this.rs = rs;
     this.t = 0;
-    this.scene = new Scene(rs);
-    this.scene.onEvent = (e) => {
-      if (this.started) this.friendSay(e === 'SIX!' ? 'six' : e === 'OUT!' ? 'out' : 'four');
-    };
     this.hands = [makeHand('cam'), makeHand('cam'), makeHand('mouse')];
     this.face = { present: false, x: 960, y: 380, top: 250, h: 220, open: false };
     this.opts = { skeleton: true, assist: true };
     this.ui = { mic: 'off', heard: '', heardT: -99, camera: false, debug: false, fps: 0 };
     this.personOpaque = false;
     this.started = false;
+    this.setTheme(themeId);
+  }
+
+  /** Swap worlds. Rebuilds the scene + cast and starts a fresh round. */
+  setTheme(id) {
+    this.theme = getTheme(id);
+    this.scene = this.theme.createScene(this.rs);
+    this.scene.onEvent = (e) => {
+      if (this.started) this.friendSay(e === 'SIX!' ? 'six' : e === 'OUT!' ? 'out' : 'four');
+    };
     this.reset();
   }
 
@@ -103,11 +77,16 @@ export class Game {
     for (const h of this.hands) {
       h.held = null;
       h.hover = null;
+      h.hoverSource = null;
       h.wasClosed = false; // otherwise a fist held across a reset can't grab again
       h.closedT = 0;
     }
-    this.friend = new Friend();
-    this.waiter = new Waiter();
+    const cast = this.theme.createCast(this);
+    this.friend = cast.companion; // always there: Bunty, the cat, her
+    this.waiter = cast.server || null; // brings bottles (may be the companion herself)
+    this.fridge = cast.fridge || null;
+    this.actors = [...new Set([this.friend, this.waiter, this.fridge].filter(Boolean))];
+
     this.particles = new Particles();
     this.bottles = [];
     this.mug = new Mug(MUG_HOME);
@@ -132,6 +111,8 @@ export class Game {
     this.drinkHold = 0;
     this.jarPop = 0;
     this.noHandsT = 0;
+    this.introPending = false;
+    this.theme.setup?.(this);
     if (this.started) {
       this.started = false;
       this.start();
@@ -143,7 +124,14 @@ export class Game {
     this.started = true;
     this.lastAction = this.t;
     this.later(0.8, () => this.friendSay('intro', true));
-    this.later(2.0, () => this.callWaiter('intro'));
+    if (this.theme.introServe) {
+      // the first round is on the house — don't nag "out of beer" before it arrives
+      this.introPending = true;
+      this.later(this.theme.introServeDelay ?? 2, () => {
+        this.introPending = false;
+        this.callWaiter('intro');
+      });
+    }
   }
 
   later(s, fn) {
@@ -256,10 +244,12 @@ export class Game {
     this.particles.update(dt);
     this.collide();
     this.updateJob(dt);
-    this.waiter.update(dt);
     const heldHand = this.hands.find((h) => h.held);
     const look = heldHand ? heldHand.held : this.hands.find((h) => h.present) || this.mug;
-    this.friend.update(dt, look, this.drunk);
+    for (const a of this.actors) {
+      if (a === this.friend) a.update(dt, look, this.drunk);
+      else a.update(dt, this);
+    }
     this.updateRules(dt);
 
     for (const p of this.puddles) p.a -= dt * 0.025;
@@ -268,6 +258,11 @@ export class Game {
     this.popups = this.popups.filter((p) => p.age < p.dur);
     this.bottles = this.bottles.filter((b) => b.state !== 'gone');
     for (const h of this.hands) if (h.hover?.state === 'gone') h.hover = null;
+    // Pulling beers from a fridge all night: quietly clear the oldest empties.
+    if (this.bottles.length > 7) {
+      const empty = this.bottles.find((b) => b.state === 'table' && !b.capped && b.level < 0.02);
+      if (empty) empty.state = 'gone';
+    }
 
     this.drinkHold = Math.max(0, this.drinkHold - dt);
     this.shake = Math.max(0, this.shake - dt * 2.5);
@@ -295,6 +290,7 @@ export class Game {
         }
         if (!h.present) {
           h.hover = null;
+          h.hoverSource = null;
           h.raiseT = 0;
           h.wasClosed = false;
           continue;
@@ -320,6 +316,7 @@ export class Game {
         if (!h.present) {
           if (h.held) this.release(h, true);
           h.hover = null;
+          h.hoverSource = null;
           h.wasClosed = false;
           continue;
         }
@@ -338,6 +335,7 @@ export class Game {
       if (!h.closed && h.held) this.release(h, false);
       h.wasClosed = h.closed;
       h.hover = h.held ? null : this.findGrabbable(h.x, h.y);
+      h.hoverSource = h.held || h.hover ? null : this.findSource(h.x, h.y);
 
       if (h.source === 'cam') {
         h.raiseCd = Math.max(0, h.raiseCd - dt);
@@ -368,9 +366,33 @@ export class Game {
     return best;
   }
 
+  // Things you can pull a fresh bottle out of (the mini fridge).
+  findSource(x, y) {
+    return this.fridge && this.fridge.grabDist(x, y) < 20 ? this.fridge : null;
+  }
+
   tryGrab(h) {
-    const o = this.findGrabbable(h.x, h.y);
-    if (!o) return;
+    let o = this.findGrabbable(h.x, h.y);
+    if (!o) {
+      const source = this.findSource(h.x, h.y);
+      if (!source) return;
+      o = source.take(this);
+      if (!o) {
+        if (this.t > (this.cool.emptySource || 0)) {
+          this.cool.emptySource = this.t + 2.5;
+          this.popup('FRIDGE KHAALI! 🧊', source.x, source.top - 40, { size: 44, color: '#bfefff' });
+          this.friendSay('empty', true);
+        }
+        return;
+      }
+      o.x = h.x;
+      o.y = h.y;
+      this.bottles.push(o);
+      if (this.t > (this.cool.chilled || 0)) {
+        this.cool.chilled = this.t + 6;
+        this.popup('THANDI! ❄️', source.x - 40, source.top + 20, { size: 40, color: '#bfefff', dur: 0.9 });
+      }
+    }
     o.state = 'held';
     o.holder = h;
     h.held = o;
@@ -585,9 +607,11 @@ export class Game {
     if (mug.session > 0.3 && mug.level < 0.03 && this.drinkHold <= 0) this.jarDone();
 
     if (mug.state === 'held') {
-      const g = this.friend.glassPos;
-      if (mug.x < 720) this.friend.anticipate();
-      if (dist(mug.x, mug.y, g.x, g.y) < 150 && this.t > (this.cool.cheers || 0)) this.doCheers();
+      const g = this.friend.glassPos; // null while she's away fetching beer
+      if (g) {
+        if (mug.x < 720) this.friend.anticipate?.();
+        if (dist(mug.x, mug.y, g.x, g.y) < 150 && this.t > (this.cool.cheers || 0)) this.doCheers(g);
+      }
     }
   }
 
@@ -695,23 +719,41 @@ export class Game {
     }
   }
 
-  doCheers() {
+  doCheers(g) {
     this.cool.cheers = this.t + 3;
     const mug = this.mug;
-    const g = this.friend.glassPos;
     const cx = (mug.x + g.x) / 2;
     const cy = (mug.y + g.y) / 2 - 40;
-    this.audio.clink(1);
     this.friend.cheers();
-    for (let i = 0; i < 28; i++) {
-      const a = rand(0, Math.PI * 2);
-      const s = rand(200, 700);
-      this.particles.add({ kind: 'spark', x: cx, y: cy, vx: Math.cos(a) * s, vy: Math.sin(a) * s, g: 400, life: rand(0.3, 0.7), size: rand(0, 5) });
+    if (this.theme.hearts) {
+      this.audio.clink(this.theme.voice.who === 'cat' ? 0.3 : 1);
+      this.audio.sparkle();
+      for (let i = 0; i < 16; i++) {
+        this.particles.add({
+          kind: 'heart',
+          x: cx + rand(-30, 30),
+          y: cy,
+          vx: rand(-260, 260),
+          vy: rand(-420, -140),
+          g: 260,
+          drag: 1.2,
+          life: rand(0.9, 1.5),
+          size: rand(9, 17),
+          color: pick(['rgba(255,95,162,A)', 'rgba(255,143,192,A)', 'rgba(255,208,228,A)']),
+        });
+      }
+    } else {
+      this.audio.clink(1);
+      for (let i = 0; i < 28; i++) {
+        const a = rand(0, Math.PI * 2);
+        const s = rand(200, 700);
+        this.particles.add({ kind: 'spark', x: cx, y: cy, vx: Math.cos(a) * s, vy: Math.sin(a) * s, g: 400, life: rand(0.3, 0.7), size: rand(0, 5) });
+      }
     }
     for (let i = 0; i < 8; i++) {
       this.particles.add({ kind: 'foam', x: cx, y: cy, vx: rand(-200, 200), vy: rand(-400, -100), g: 1200, life: 0.9, size: rand(3, 6) });
     }
-    this.popup('CHEERS! 🍻', cx + 80, cy - 70, { size: 72, color: '#ffd23f', dur: 1.4 });
+    this.popup(this.theme.cheersText, cx + 80, cy - 70, { size: 72, color: this.theme.hud.accent, dur: 1.4 });
     this.shake = 0.35;
     this.flash = 0.6;
     mug.wave = 6;
@@ -742,7 +784,7 @@ export class Game {
     this.mug.session = 0;
     this.stats.jars++;
     this.jarPop = 1;
-    this.popup(`JAR KHATAM! 🍺×${this.stats.jars}`, W / 2, 300, { size: 84, color: '#ffd23f', dur: 1.8, rise: 40 });
+    this.popup(`${this.theme.jarText} 🍺×${this.stats.jars}`, W / 2, 300, { size: 84, color: this.theme.hud.accent, dur: 1.8, rise: 40 });
     this.flash = 0.8;
     this.shake = 0.3;
     this.confetti(W / 2, 260, 70);
@@ -754,7 +796,7 @@ export class Game {
     });
     this.later(1.5, () => this.friendSay('jarDone', true));
     this.tutDone(2);
-    track('jar_finished', { jars: this.stats.jars, litres: +this.stats.drunkL.toFixed(2) });
+    track('jar_finished', { jars: this.stats.jars, litres: +this.stats.drunkL.toFixed(2), theme: this.theme.id });
   }
 
   breakBottle(o) {
@@ -792,10 +834,14 @@ export class Game {
     this.friendSay('broke', true);
   }
 
-  // ------------------------------------------------------------------ waiter
+  // ------------------------------------------------------------------ refills
 
+  /** Voice / raised hand / button / W key. What happens depends on the world. */
   callWaiter(src) {
     if (!this.started) return false;
+    const th = this.theme;
+    if (th.refill === 'fridge') return this.restockFridge(src);
+
     if (this.job) {
       if (src !== 'intro' && this.t > (this.cool.busy || 0)) {
         this.cool.busy = this.t + 4;
@@ -803,46 +849,87 @@ export class Game {
       }
       return false;
     }
-    if (src !== 'intro') {
-      this.audio.ding();
-      const label = src === 'voice' ? 'WAITERRR! 📣' : src === 'hand' ? 'OYE CHHOTU! ✋' : 'WAITER! 🛎️';
-      this.popup(label, W / 2, 330, { size: 84, color: '#ffd23f', dur: 1.5 });
-      this.shake = 0.4;
-      this.tutDone(3);
-      track('waiter_called', { source: src }); // voice | hand | key
-      this.later(0.2, () => this.friendSay('callWaiter', true));
-    }
+    const serve = th.refill === 'serve';
     const empties = this.bottles.filter((b) => b.state === 'table' && !b.capped && b.level < 0.06);
     const keep = this.bottles.filter((b) => !empties.includes(b)).length;
-    const need = Math.max(0, SLOTS.length - keep);
+    const need = Math.max(0, th.slots.length - keep);
+    if (serve && need === 0 && empties.length === 0) {
+      this.waiterSay('full');
+      return false;
+    }
+    if (src !== 'intro') {
+      this.audio.ding();
+      this.popup(th.callLabels[src] || th.callLabels.key, W / 2, 330, { size: 84, color: th.hud.accent, dur: 1.5 });
+      this.shake = 0.4;
+      this.tutDone(3);
+      track('waiter_called', { source: src, theme: th.id }); // voice | hand | key
+      this.later(0.2, () => this.friendSay('callWaiter', true));
+    }
     const w = this.waiter;
-    if (!w.visible) w.x = W + 150;
-    w.walkTo(1440);
-    w.trayNew = need;
     w.trayEmpty = 0;
     w.handTarget = null;
+    if (serve) {
+      // she gets up, heads off to the kitchen, comes back with a tray
+      w.leaveSeat();
+      w.walkTo(W + 160);
+      w.trayNew = 0;
+    } else {
+      if (!w.visible) w.x = W + 150;
+      w.walkTo(1440);
+      w.trayNew = need;
+    }
     const steps = [...empties.map((b) => ({ type: 'collect', b })), ...Array.from({ length: need }, () => ({ type: 'place' }))];
     if (need > 0) steps.push({ type: 'openAll' });
+    if (serve) steps.push({ type: 'pour' });
     steps.push({ type: 'bye', quiet: need === 0 && empties.length === 0 });
-    this.job = { steps, i: 0, phase: 'enter' };
+    this.job = { steps, i: 0, phase: serve ? 'fetch' : 'enter', need };
     this.later(src === 'intro' ? 0.4 : 1.1, () => this.waiterSay(need > 0 || empties.length ? 'hi' : 'full'));
     return true;
   }
 
+  restockFridge(src) {
+    const f = this.fridge;
+    if (!f || f.pending > 0) return false;
+    const added = f.restock(12);
+    if (added <= 0) {
+      if (this.t > (this.cool.full || 0)) {
+        this.cool.full = this.t + 3;
+        this.popup('FRIDGE FULL ❄️', f.x, f.top - 60, { size: 48, color: '#bfefff' });
+      }
+      return false;
+    }
+    this.audio.fridgeOpen();
+    this.popup(`${this.theme.callLabels[src] || this.theme.callLabels.key} +${added}`, W / 2, 330, { size: 72, color: this.theme.hud.accent, dur: 1.5 });
+    this.tutDone(3);
+    track('waiter_called', { source: src, theme: this.theme.id });
+    this.later(0.3, () => this.friendSay('callWaiter', true));
+    return true;
+  }
+
   freeSlot() {
+    const slots = this.theme.slots;
     const taken = (x) =>
       this.reserved.some((r) => Math.abs(r - x) < 55) ||
       this.bottles.some((b) => b.state !== 'held' && Math.abs(b.x - x) < 55) ||
       Math.abs(this.mug.x - x) < 110;
-    for (const x of SLOTS) if (!taken(x)) return x;
+    for (const x of slots) if (!taken(x)) return x;
     for (let x = 600; x < 1400; x += 30) if (!taken(x)) return x;
-    return SLOTS[0];
+    return slots[0];
   }
 
   updateJob(dt) {
     const j = this.job;
     if (!j) return;
     const w = this.waiter;
+    const serve = this.theme.refill === 'serve';
+    if (j.phase === 'fetch') {
+      if (w.arrived) {
+        w.trayNew = j.need;
+        w.walkTo(1440);
+        j.phase = 'enter';
+      }
+      return;
+    }
     if (j.phase === 'enter') {
       if (w.arrived) j.phase = 'work';
       return;
@@ -852,6 +939,7 @@ export class Game {
         this.job = null;
         w.trayEmpty = 0;
         w.trayNew = 0;
+        if (serve) w.sit();
       }
       return;
     }
@@ -864,7 +952,7 @@ export class Game {
       j.phase = 'leave';
       w.handTarget = null;
       w.opener = false;
-      w.walkTo(W + 170);
+      w.walkTo(serve ? w.seatX : W + 170);
       return;
     }
     const reach = (x) => w.walkTo(clamp(x + 150, 640, 1440));
@@ -888,6 +976,17 @@ export class Game {
       } else if (s.type === 'open') {
         if (!s.b.capped || s.b.state === 'gone') return next();
         reach(s.b.x);
+      } else if (s.type === 'pour') {
+        const mug = this.mug;
+        const b = this.bottles.find((x) => x.state === 'table' && !x.capped && !x.locked && x.level > 0.6);
+        if (!b || mug.state !== 'table' || mug.level > 0.35) return next();
+        s.b = b;
+        s.home = b.x;
+        s.from = [b.x, b.y];
+        b.state = 'served';
+        b.locked = true;
+        w.walkTo(clamp(mug.x + 240, 640, 1440));
+        this.waiterSay('pour');
       } else if (s.type === 'bye') {
         w.handTarget = null;
         if (!s.quiet) this.waiterSay('bye');
@@ -968,9 +1067,63 @@ export class Game {
         if (s.t > 0.65) next();
         break;
       }
+      case 'pour': {
+        // she lifts a bottle over your jar and pours it for you
+        const b = s.b;
+        const mug = this.mug;
+        if (b.state !== 'served' || mug.state !== 'table') {
+          if (b.state === 'served') {
+            b.state = 'falling';
+            b.locked = false;
+          }
+          return next();
+        }
+        const [rx, ry] = mug.rim;
+        const px = rx + 58;
+        const py = ry - 150;
+        if (!s.phase) s.phase = 'lift';
+        if (s.phase === 'lift') {
+          const k = clamp(s.t / 0.5, 0, 1);
+          const e = easeInOut(k);
+          b.x = lerp(s.from[0], px, e);
+          b.y = lerp(s.from[1], py, e) - Math.sin(k * Math.PI) * 40;
+          b.angle = lerp(0, -0.6, e);
+          if (k >= 1) {
+            s.phase = 'pour';
+            s.pt = 0;
+          }
+        } else if (s.phase === 'pour') {
+          s.pt += dt;
+          b.x = px;
+          b.y = py;
+          b.angle = smooth(b.angle, -2.35, 4, dt);
+          b.assist = 1;
+          if (mug.level >= 0.82 || b.level <= 0.02 || s.pt > 4.5) {
+            s.phase = 'back';
+            s.bt = 0;
+            s.bf = [b.x, b.y, b.angle];
+            b.assist = 0;
+          }
+        } else {
+          s.bt += dt;
+          const k = clamp(s.bt / 0.55, 0, 1);
+          const e = easeInOut(k);
+          b.angle = lerp(s.bf[2], 0, e);
+          b.x = lerp(s.bf[0], s.home, e);
+          b.y = lerp(s.bf[1], b.restY, e) - Math.sin(k * Math.PI) * 30;
+          if (k >= 1) {
+            b.state = 'table';
+            b.locked = false;
+            b.y = b.restY;
+            next();
+          }
+        }
+        w.handTarget = { x: b.x + 12, y: b.y };
+        break;
+      }
       case 'bye':
         if (s.t > 1.2) {
-          this.friend.glassLevel = 0.9;
+          if ('glassLevel' in this.friend) this.friend.glassLevel = 0.9;
           next();
         }
         break;
@@ -982,8 +1135,9 @@ export class Game {
   updateRules(dt) {
     if (!this.started) return;
     const t = this.t;
-    const left = this.bottles.reduce((s, b) => s + (b.capped ? 1 : b.level), 0);
-    this.outOfBeer = left < 0.03 && this.mug.level < 0.03 && !this.job;
+    let left = this.bottles.reduce((s, b) => s + (b.capped ? 1 : b.level), 0);
+    if (this.fridge) left += this.fridge.stock + this.fridge.pending;
+    this.outOfBeer = left < 0.03 && this.mug.level < 0.03 && !this.job && !this.introPending;
     if (this.outOfBeer) {
       this.emptyT += dt;
       if (this.emptyT > 1.2 && t > (this.cool.empty || 0)) {
@@ -1006,29 +1160,39 @@ export class Game {
   }
 
   tutDone(step) {
+    const steps = this.theme.tutorial;
     if (this.tut !== step) return;
     this.tut++;
     this.tutFlash = 1;
-    track('tutorial_step', { step: this.tut, of: TUTORIAL.length }); // shows where people drop off
-    if (this.tut >= TUTORIAL.length) {
-      this.later(1.5, () => this.popup('PRO BEWDA UNLOCKED 🏆', W / 2, 180, { size: 58, color: '#9cff6b', dur: 2 }));
+    track('tutorial_step', { step: this.tut, of: steps.length, theme: this.theme.id }); // shows where people drop off
+    if (this.tut >= steps.length) {
+      this.later(1.5, () => this.popup(this.theme.proText, W / 2, 180, { size: 58, color: '#9cff6b', dur: 2 }));
     }
   }
 
   friendSay(key, force = false) {
+    const lines = this.theme.lines[key];
+    if (!lines) return;
     const t = this.t;
     if (!force && (this.friend.talkT > 0 || t < (this.cool.anyLine || 0) || t < (this.cool['l_' + key] || 0))) return;
     this.cool['l_' + key] = t + (LINE_CD[key] ?? 8);
     this.cool.anyLine = t + 3;
-    const text = pick(LINES[key]);
+    const text = pick(lines);
     this.friend.say(text);
-    this.audio.speak(text, 'friend', this.drunk);
+    this.friend.react?.(key);
+    const who = this.theme.voice.who;
+    if (who === 'cat') {
+      if (/prr/i.test(text)) this.audio.purr();
+      else if (/meow|mrr|hiss/i.test(text)) this.audio.meow();
+    } else this.audio.speak(text, who, this.drunk);
   }
 
   waiterSay(key) {
-    const text = pick(WAITER_LINES[key]);
+    const lines = this.theme.serverLines?.[key];
+    if (!lines || !this.waiter) return;
+    const text = pick(lines);
     this.waiter.say(text);
-    this.audio.speak(text, 'waiter');
+    this.audio.speak(text, this.theme.voice.serverWho || 'waiter');
   }
 
   popup(text, x, y, o = {}) {
@@ -1036,6 +1200,12 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ render
+
+  // Actors opt into layers: drawBack (behind you), drawMid (in front of you, behind
+  // the table), drawFront (on the table), drawTop (over the bottles), drawBubble.
+  layer(ctx, name, t) {
+    for (const a of this.actors) a[name]?.(ctx, t);
+  }
 
   render(ctx, drawPerson) {
     const t = this.t;
@@ -1052,11 +1222,12 @@ export class Game {
     }
 
     this.scene.drawBack(ctx, t);
-    if (!this.personOpaque) this.friend.drawBody(ctx);
+    if (!this.personOpaque) this.layer(ctx, 'drawBack', t);
     drawPerson(ctx);
-    if (this.personOpaque) this.friend.drawBody(ctx);
-    this.waiter.drawBody(ctx);
+    if (this.personOpaque) this.layer(ctx, 'drawBack', t);
+    this.layer(ctx, 'drawMid', t);
     this.scene.drawTable(ctx);
+    this.scene.drawTableTop?.(ctx, t);
 
     for (const p of this.puddles) {
       ctx.fillStyle = `rgba(230,150,30,${p.a})`;
@@ -1069,7 +1240,7 @@ export class Game {
       ctx.fill();
     }
 
-    this.friend.drawFront(ctx, t);
+    this.layer(ctx, 'drawFront', t);
     const objs = [...this.bottles, this.mug];
     for (const o of objs) {
       if (o.state === 'held') continue;
@@ -1083,10 +1254,9 @@ export class Game {
     }
     this.particles.draw(ctx);
     for (const o of objs) if (o.state === 'held') o.draw(ctx, t);
-    this.waiter.drawFront(ctx);
+    this.layer(ctx, 'drawTop', t);
     this.drawHands(ctx);
-    this.friend.drawBubble(ctx);
-    this.waiter.drawBubble(ctx);
+    this.layer(ctx, 'drawBubble', t);
     this.drawPopups(ctx);
     ctx.restore();
     this.drawHUD(ctx);
@@ -1096,7 +1266,8 @@ export class Game {
     const t = this.t;
     for (const h of this.hands) {
       if (!h.present || !this.started) continue;
-      const col = h.held ? '255,190,60' : h.hover ? '120,255,160' : '120,220,255';
+      const hovering = h.hover || h.hoverSource;
+      const col = h.held ? '255,190,60' : hovering ? '120,255,160' : '120,220,255';
       if (h.pts && this.opts.skeleton) {
         ctx.save();
         ctx.globalAlpha = h.held ? 0.35 : 0.7;
@@ -1129,23 +1300,32 @@ export class Game {
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.textAlign = 'center';
-      if (h.hover && !h.held) {
+      if (hovering && !h.held) {
+        const label = h.hoverSource
+          ? h.hoverSource.stock > 0
+            ? h.source === 'mouse'
+              ? 'CLICK FOR A BEER'
+              : '✊ GRAB A BEER'
+            : 'EMPTY 🧊'
+          : h.source === 'mouse'
+            ? 'CLICK TO GRAB'
+            : '✊ GRAB';
         ctx.font = '800 18px "Baloo 2", sans-serif';
         ctx.lineWidth = 4;
         ctx.strokeStyle = 'rgba(0,0,0,.7)';
-        ctx.strokeText(h.source === 'mouse' ? 'CLICK TO GRAB' : '✊ GRAB', 0, -46);
+        ctx.strokeText(label, 0, -46);
         ctx.fillStyle = '#fff';
-        ctx.fillText(h.source === 'mouse' ? 'CLICK TO GRAB' : '✊ GRAB', 0, -46);
+        ctx.fillText(label, 0, -46);
       }
       if (h.raiseT > 0.05) {
-        ctx.strokeStyle = '#ffd23f';
+        ctx.strokeStyle = this.theme.hud.accent;
         ctx.lineWidth = 7;
         ctx.beginPath();
         ctx.arc(0, 0, 48, -Math.PI / 2, -Math.PI / 2 + (h.raiseT / 1.3) * Math.PI * 2);
         ctx.stroke();
         ctx.font = '30px Bangers, Impact, sans-serif';
-        ctx.fillStyle = '#ffd23f';
-        ctx.fillText('WAITER…', 0, -64);
+        ctx.fillStyle = this.theme.hud.accent;
+        ctx.fillText(`${this.theme.voice.word}…`, 0, -64);
       }
       if (this.ui.debug && h.source === 'cam') {
         ctx.font = '600 14px monospace';
@@ -1170,7 +1350,7 @@ export class Game {
       ctx.textBaseline = 'middle';
       ctx.lineJoin = 'round';
       ctx.lineWidth = p.size * 0.16;
-      ctx.strokeStyle = '#2b0f00';
+      ctx.strokeStyle = '#1e0d14';
       ctx.strokeText(p.text, 0, 0);
       ctx.fillStyle = p.color;
       ctx.fillText(p.text, 0, 0);
@@ -1181,9 +1361,11 @@ export class Game {
   drawHUD(ctx) {
     if (!this.started) return;
     const t = this.t;
+    const hud = this.theme.hud;
+    const tutorial = this.theme.tutorial;
     ctx.save();
-    ctx.fillStyle = 'rgba(14,9,4,.68)';
-    ctx.strokeStyle = 'rgba(255,210,80,.55)';
+    ctx.fillStyle = hud.panel;
+    ctx.strokeStyle = hud.border;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.roundRect(16, 16, 316, 178, 18);
@@ -1192,7 +1374,7 @@ export class Game {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     const label = (txt, x, y) => {
-      ctx.fillStyle = '#e9cf9f';
+      ctx.fillStyle = hud.label;
       ctx.font = '800 14px "Baloo 2", sans-serif';
       ctx.fillText(txt, x, y);
     };
@@ -1203,7 +1385,7 @@ export class Game {
     const js = 1 + this.jarPop * 0.45;
     ctx.scale(js, js);
     ctx.font = '60px Bangers, Impact, sans-serif';
-    ctx.fillStyle = '#ffd23f';
+    ctx.fillStyle = hud.accent;
     ctx.fillText(`🍺${this.stats.jars}`, 0, 0);
     ctx.restore();
     ctx.font = '34px Bangers, Impact, sans-serif';
@@ -1243,30 +1425,30 @@ export class Game {
       }
     }
 
-    if (this.tut < TUTORIAL.length) {
-      const text = TUTORIAL[this.tut];
+    if (this.tut < tutorial.length) {
+      const text = tutorial[this.tut];
       ctx.font = '800 25px "Baloo 2", sans-serif';
       const w = ctx.measureText(text).width + 150;
       const s = 1 + this.tutFlash * 0.12;
       ctx.save();
       ctx.translate(W / 2 + 70, 46); // top strip, so it never covers your face
       ctx.scale(s, s);
-      ctx.fillStyle = 'rgba(14,9,4,.8)';
-      ctx.strokeStyle = 'rgba(255,210,80,.7)';
+      ctx.fillStyle = hud.panel;
+      ctx.strokeStyle = hud.border;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.roundRect(-w / 2, -27, w, 54, 27);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#ffd23f';
+      ctx.fillStyle = hud.accent;
       ctx.beginPath();
       ctx.roundRect(-w / 2 + 8, -19, 104, 38, 19);
       ctx.fill();
-      ctx.fillStyle = '#1b0f05';
+      ctx.fillStyle = '#1b0f14';
       ctx.font = '800 17px "Baloo 2", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`STEP ${this.tut + 1}/${TUTORIAL.length}`, -w / 2 + 60, 1);
+      ctx.fillText(`STEP ${this.tut + 1}/${tutorial.length}`, -w / 2 + 60, 1);
       ctx.fillStyle = '#fff';
       ctx.font = '800 25px "Baloo 2", sans-serif';
       ctx.textAlign = 'left';
@@ -1275,6 +1457,7 @@ export class Game {
     }
 
     if (this.outOfBeer && this.emptyT > 0.8) {
+      const { title, sub } = this.theme.prompt;
       const p = 1 + Math.sin(t * 6) * 0.05;
       ctx.save();
       ctx.translate(W / 2, 470);
@@ -1283,25 +1466,25 @@ export class Game {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.lineJoin = 'round';
-      ctx.font = '100px Bangers, Impact, sans-serif';
+      ctx.font = '96px Bangers, Impact, sans-serif';
       ctx.lineWidth = 16;
-      ctx.strokeStyle = '#2b0f00';
-      ctx.strokeText('BOLO "WAITER!"', 0, 0);
-      ctx.fillStyle = '#ffd23f';
-      ctx.fillText('BOLO "WAITER!"', 0, 0);
+      ctx.strokeStyle = '#1e0d14';
+      ctx.strokeText(title, 0, 0);
+      ctx.fillStyle = hud.accent;
+      ctx.fillText(title, 0, 0);
       ctx.font = '800 28px "Baloo 2", sans-serif';
       ctx.lineWidth = 7;
-      const sub = '🗣️ shout it   •   ✋ raise a hand   •   ⌨️ press W';
       ctx.strokeText(sub, 0, 64);
       ctx.fillStyle = '#fff';
       ctx.fillText(sub, 0, 64);
       ctx.restore();
     }
 
+    const word = this.theme.voice.word;
     const mic = this.ui.mic;
     const micText =
       mic === 'listening'
-        ? '🎤 Listening… say "WAITER"'
+        ? `🎤 Listening… say "${word}"`
         : mic === 'denied'
           ? '🎤 Mic blocked — press W'
           : mic === 'unsupported'
@@ -1311,7 +1494,7 @@ export class Game {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const mw = ctx.measureText(micText).width + 44;
-    ctx.fillStyle = 'rgba(14,9,4,.7)';
+    ctx.fillStyle = hud.panel;
     ctx.beginPath();
     ctx.roundRect(16, H - 58, mw, 42, 21);
     ctx.fill();
